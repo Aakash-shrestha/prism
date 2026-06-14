@@ -20,3 +20,26 @@ class ParsedDiff(BaseModel):
     files: list[FileDiff]
     total_files: int
     model_config = ConfigDict(extra="forbid")
+
+
+class ReviewComment(BaseModel):
+    """
+    represents a review comment to be posted on GitHub
+    """
+
+    filename: str
+    line: int
+    comment: str
+    severity: str  # critical, suggestion or nitpick
+    model_config = ConfigDict(extra="forbid")
+
+
+class ClassificationResult(BaseModel):
+    diff_type: str
+    reasoning: str
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReviewCommentList(BaseModel):
+    comments: list[ReviewComment]
+    model_config = ConfigDict(extra="forbid")
