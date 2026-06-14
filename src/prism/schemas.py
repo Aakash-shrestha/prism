@@ -43,3 +43,8 @@ class ClassificationResult(BaseModel):
 class ReviewCommentList(BaseModel):
     comments: list[ReviewComment]
     model_config = ConfigDict(extra="forbid")
+
+
+class FilteredCommentList(BaseModel):
+    comments: list[ReviewComment]
+    model_config = ConfigDict(extra="forbid")

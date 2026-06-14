@@ -5,7 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 
 from prism.config import settings
-from prism.schemas import ClassificationResult, ReviewComment, ReviewCommentList
+from prism.schemas import ClassificationResult, ReviewComment, ReviewCommentList, FilteredCommentList
 
 
 class AgentState(TypedDict):
@@ -90,3 +90,54 @@ def generate_node(state: AgentState) -> dict:
     result = chain.invoke({"raw_diff": raw_diff})
 
     return {"comments": result.comments}
+
+
+def critic_node(state: AgentState) -> dict:
+    comments = state["comments"]
+    raw_diff = state["raw_diff"]
+
+    if not comments:
+        return {"filtered_comments": []}
+
+    model = ChatGroq(
+        model="llama-3.3-70b-versatile",
+        api_key=settings.groq_api_key.get_secret_value(),
+        temperature=0,
+    )
+
+    structured_model = model.with_structured_output(FilteredCommentList)
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                dedent("""
+                    You are a senior engineer reviewing AI-generated PR comments before they are posted.
+                    Your job is to filter out comments that are wrong, vague, or not worth the author's time.
+
+                    Keep a comment if:
+                    - It identifies a real bug, security issue, or correctness problem (always keep critical)
+                    - It is a clear, actionable suggestion grounded in the actual diff
+                    - It is a nitpick only if it is clearly valid and specific — not a style preference
+
+                    Drop a comment if:
+                    - It is vague or could apply to any codebase ("consider adding error handling")
+                    - It references code that does not exist in the diff (hallucinated)
+                    - It is a nitpick about naming, formatting, or style with no real impact
+                    - It is borderline — when in doubt, discard it
+
+                    Severity rule: keep all critical and suggestion comments that pass the above checks.
+                    For nitpicks, keep only if the issue is clearly valid and specific.
+                """).strip(),
+            ),
+            ("human", "PR Diff:\n{raw_diff}\n\nAI-Generated Comments:\n{comments}"),
+        ]
+    )
+
+    formatted_comments = "\n".join(
+        f"{i}. [{c.severity.upper()}] {c.filename} (line {c.line}): {c.comment}"
+        for i, c in enumerate(comments, 1)
+    )
+    chain = prompt | structured_model
+    result = chain.invoke({"raw_diff": raw_diff, "comments": formatted_comments})
+    return {"filtered_comments": result.comments}
