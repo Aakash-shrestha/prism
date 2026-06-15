@@ -3,15 +3,12 @@ import hmac
 import json
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
-from prism.agent import run_review
 from prism.config import settings
-from prism.github_client import fetch_pr_diff
-from prism.schemas import ReviewComment
-from prism.woker import review_pr_task
+from prism.worker import review_pr_task
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
@@ -48,15 +45,23 @@ async def github_webhook(request: Request):
     if not verify_signature(raw_bytes, signature):
         raise HTTPException(status_code=403, detail="Invalid signature")
 
+    payload_dict = json.loads(raw_bytes)
+
+    if "zen" in payload_dict:
+        return JSONResponse(status_code=200, content={"status": "pong"})
+
     try:
-        payload_dict = json.loads(raw_bytes)
         payload = PRWebhookPayload(**payload_dict)
 
         repo = payload.repository.full_name
     except (json.JSONDecodeError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f"Invalid payload: {e}") from e
     if payload.action in ["opened", "synchronize"]:
-        review_pr_task.delay(repo, payload.number)
+        try:
+            commit_sha = payload.pull_request["head"]["sha"]
+        except KeyError as e:
+            raise HTTPException(status_code=400, detail="Missing pull_request.head.sha in payload") from e
+        review_pr_task.delay(repo, payload.number, commit_sha)
         return JSONResponse(
             status_code=202,
             content={"status": "accepted", "pr": payload.number},

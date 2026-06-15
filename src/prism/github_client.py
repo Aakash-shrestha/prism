@@ -1,7 +1,7 @@
 import httpx
 
 from prism.config import settings
-from prism.schemas import FileDiff, ParsedDiff
+from prism.schemas import FileDiff, ParsedDiff, ReviewComment
 
 
 async def fetch_pr_diff(repo: str, pr_number: int) -> str:
@@ -11,9 +11,15 @@ async def fetch_pr_diff(repo: str, pr_number: int) -> str:
         "Accept": "application/vnd.github.v3.diff",
     }
     async with httpx.AsyncClient() as client:
-        response = await client.get(url, headers=headers)  # sends the http request
-        response.raise_for_status()  # httpx does not directly raise for non-2xx status codes, so we need to call this method to raise an exception if the request failed
-        return response.text  # raw text instead of json, due to accept header
+        try:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            return response.text
+        except httpx.HTTPStatusError as e:
+            print(
+                f"GitHub API error {e.response.status_code} fetching diff for {repo}#{pr_number}: {e}"
+            )
+            raise
 
 
 def parse_diff(raw_diff: str) -> ParsedDiff:
@@ -43,3 +49,34 @@ def parse_diff(raw_diff: str) -> ParsedDiff:
         file_diffs.append(FileDiff(filename=filename, status=status, patch=patch))
 
     return ParsedDiff(files=file_diffs, total_files=len(files))
+
+
+async def post_review_comment(
+    repo: str,
+    pr_number: int,
+    commit_sha: str,
+    comments: list[ReviewComment],
+) -> None:
+    url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/reviews"
+
+    review = {
+        "commit_id": commit_sha,
+        "body": "prism review",
+        "event": "COMMENT",
+        "comments": [{"path": c.filename, "line": c.line, "body": c.comment} for c in comments],
+    }
+
+    headers = {
+        "Authorization": f"Bearer {settings.github_token}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, json=review, headers=headers)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            print(
+                f"GitHub API error {e.response.status_code} posting review comment for {repo}#{pr_number}: {e}"
+            )
+            raise

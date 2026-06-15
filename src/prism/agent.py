@@ -168,7 +168,9 @@ def build_graph():
     return graph.compile()
 
 
-def run_review(repo: str, pr_number: int, raw_diff: str) -> list[ReviewComment]:
+def run_review(
+    repo: str, pr_number: int, raw_diff: str
+) -> tuple[ClassificationResult, list[ReviewComment]]:
     graph = build_graph()
     initial_state: AgentState = {
         "repo": repo,
@@ -179,4 +181,5 @@ def run_review(repo: str, pr_number: int, raw_diff: str) -> list[ReviewComment]:
         "filtered_comments": [],
     }
     final_state = graph.invoke(initial_state)
-    return final_state["filtered_comments"]
+    classification = cast(ClassificationResult, final_state["classification"])
+    return classification, final_state["filtered_comments"]
