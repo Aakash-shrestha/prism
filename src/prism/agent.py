@@ -1,11 +1,17 @@
 from textwrap import dedent
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
+from langgraph.graph import END, START, StateGraph
 
 from prism.config import settings
-from prism.schemas import ClassificationResult, ReviewComment, ReviewCommentList, FilteredCommentList
+from prism.schemas import (
+    ClassificationResult,
+    FilteredCommentList,
+    ReviewComment,
+    ReviewCommentList,
+)
 
 
 class AgentState(TypedDict):
@@ -21,7 +27,7 @@ def classify_node(state: AgentState) -> dict:
     raw_diff = state["raw_diff"]
     model = ChatGroq(
         model="llama-3.3-70b-versatile",
-        api_key=settings.groq_api_key.get_secret_value(),
+        api_key=settings.groq_api_key,
         temperature=0,
     )
 
@@ -39,7 +45,7 @@ def classify_node(state: AgentState) -> dict:
 
     structured_model = model.with_structured_output(ClassificationResult)
     chain = prompt | structured_model
-    result = chain.invoke({"raw_diff": raw_diff})
+    result = cast(ClassificationResult, chain.invoke({"raw_diff": raw_diff}))
 
     return {"classification": result}
 
@@ -58,13 +64,15 @@ _DEFAULT_FOCUS = "Review the diff carefully. Flag bugs, security issues, and mis
 
 def generate_node(state: AgentState) -> dict:
     raw_diff = state["raw_diff"]
+    if state["classification"] is None:
+        raise ValueError("generate_node requires classification to be set")
     diff_type = state["classification"].diff_type
 
     focus = FOCUS_BY_TYPE.get(diff_type, _DEFAULT_FOCUS)
 
     model = ChatGroq(
         model="llama-3.3-70b-versatile",
-        api_key=settings.groq_api_key.get_secret_value(),
+        api_key=settings.groq_api_key,
         temperature=0.2,
     )
 
@@ -87,7 +95,7 @@ def generate_node(state: AgentState) -> dict:
 
     structured_model = model.with_structured_output(ReviewCommentList)
     chain = prompt | structured_model
-    result = chain.invoke({"raw_diff": raw_diff})
+    result = cast(ReviewCommentList, chain.invoke({"raw_diff": raw_diff}))
 
     return {"comments": result.comments}
 
@@ -101,7 +109,7 @@ def critic_node(state: AgentState) -> dict:
 
     model = ChatGroq(
         model="llama-3.3-70b-versatile",
-        api_key=settings.groq_api_key.get_secret_value(),
+        api_key=settings.groq_api_key,
         temperature=0,
     )
 
@@ -139,5 +147,36 @@ def critic_node(state: AgentState) -> dict:
         for i, c in enumerate(comments, 1)
     )
     chain = prompt | structured_model
-    result = chain.invoke({"raw_diff": raw_diff, "comments": formatted_comments})
+    result = cast(
+        FilteredCommentList, chain.invoke({"raw_diff": raw_diff, "comments": formatted_comments})
+    )
     return {"filtered_comments": result.comments}
+
+
+def build_graph():
+    graph = StateGraph(AgentState)
+
+    graph.add_node("classify", classify_node)
+    graph.add_node("generate", generate_node)
+    graph.add_node("critic", critic_node)
+
+    graph.add_edge(START, "classify")
+    graph.add_edge("classify", "generate")
+    graph.add_edge("generate", "critic")
+    graph.add_edge("critic", END)
+
+    return graph.compile()
+
+
+def run_review(repo: str, pr_number: int, raw_diff: str) -> list[ReviewComment]:
+    graph = build_graph()
+    initial_state: AgentState = {
+        "repo": repo,
+        "pr_number": pr_number,
+        "raw_diff": raw_diff,
+        "classification": None,
+        "comments": [],
+        "filtered_comments": [],
+    }
+    final_state = graph.invoke(initial_state)
+    return final_state["filtered_comments"]

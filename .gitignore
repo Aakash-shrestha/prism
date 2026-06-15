@@ -17,6 +17,7 @@ wheels/
 .vscode/
 .zed/
 .idea/
+.ropeproject/
 
 # OS
 .DS_Store
