@@ -30,5 +30,8 @@ class Settings(BaseSettings):
     # App
     app_env: str = Field(default="development", alias="APP_ENV")
 
+    # Redis
+    redis_url: str = Field(default="redis://localhost:6379", alias="REDIS_URL")
+
 
 settings = Settings()

@@ -11,6 +11,7 @@ from prism.agent import run_review
 from prism.config import settings
 from prism.github_client import fetch_pr_diff
 from prism.schemas import ReviewComment
+from prism.woker import review_pr_task
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
@@ -37,18 +38,8 @@ class PRWebhookPayload(BaseModel):
     pull_request: dict[str, Any]
 
 
-async def process_pr(repo: str, pr_number: int) -> None:
-    raw_diff = await fetch_pr_diff(repo, pr_number)
-    filtered_comment: list[ReviewComment] = run_review(repo, pr_number, raw_diff)
-
-    for comment in filtered_comment:
-        print(
-            f"Posting comment on {comment.filename} line {comment.line}: [{comment.severity.upper()}] {comment.comment}"
-        )
-
-
 @router.post("/github")
-async def github_webhook(request: Request, background_task: BackgroundTasks):
+async def github_webhook(request: Request):
     # read raw bytes before it gets parsed into PRWebhookPayload
     raw_bytes = await request.body()
 
@@ -65,7 +56,7 @@ async def github_webhook(request: Request, background_task: BackgroundTasks):
     except (json.JSONDecodeError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f"Invalid payload: {e}") from e
     if payload.action in ["opened", "synchronize"]:
-        background_task.add_task(process_pr, repo, payload.number)
+        review_pr_task.delay(repo, payload.number)
         return JSONResponse(
             status_code=202,
             content={"status": "accepted", "pr": payload.number},
