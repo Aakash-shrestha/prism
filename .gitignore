@@ -24,3 +24,5 @@ wheels/
 
 # uv
 .python-version
+
+CLAUDE.md
