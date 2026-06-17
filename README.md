@@ -2,8 +2,6 @@
 
 An AI-powered GitHub bot that reviews pull requests automatically — catching bugs, security issues, and missing error handling before a human reviewer ever looks at the diff.
 
-> **Demo GIF** — replace this line with a screen recording of a PR receiving comments
-
 ---
 
 ## What it does
