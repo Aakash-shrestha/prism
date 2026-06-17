@@ -3,7 +3,6 @@ import random
 
 import httpx
 
-from prism.config import settings
 from prism.logging import get_logger
 from prism.schemas import FileDiff, ParsedDiff, ReviewComment
 
@@ -36,10 +35,15 @@ async def _request_with_retry(
                 raise
             if e.response.status_code in _RETRYABLE:
                 last_exc = e
-                wait = (2 ** attempt) + random.uniform(0, 1)
+                wait = (2**attempt) + random.uniform(0, 1)
                 logger.warning(
                     "retryable HTTP error, backing off",
-                    extra={"url": url, "status_code": e.response.status_code, "attempt": attempt + 1, "wait": round(wait, 2)},
+                    extra={
+                        "url": url,
+                        "status_code": e.response.status_code,
+                        "attempt": attempt + 1,
+                        "wait": round(wait, 2),
+                    },
                 )
                 await asyncio.sleep(wait)
                 continue
@@ -48,10 +52,10 @@ async def _request_with_retry(
     raise last_exc  # type: ignore[misc]
 
 
-async def fetch_pr_diff(repo: str, pr_number: int) -> str:
+async def fetch_pr_diff(repo: str, pr_number: int, token: str) -> str:
     url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}"
     headers = {
-        "Authorization": f"Bearer {settings.github_token}",
+        "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github.v3.diff",
     }
     async with httpx.AsyncClient() as client:
@@ -75,7 +79,7 @@ def parse_diff(raw_diff: str) -> ParsedDiff:
         patch_lines: list[str] = []
         for line in file.splitlines():
             if line.startswith("+++ b/"):
-                filename = line[len("+++ b/"):]
+                filename = line[len("+++ b/") :]
             elif line.startswith("+") or line.startswith("-"):
                 patch_lines.append(line)
 
@@ -85,14 +89,11 @@ def parse_diff(raw_diff: str) -> ParsedDiff:
 
 
 async def post_review_comment(
-    repo: str,
-    pr_number: int,
-    commit_sha: str,
-    comments: list[ReviewComment],
+    repo: str, pr_number: int, commit_sha: str, comments: list[ReviewComment], token: str
 ) -> None:
     url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/reviews"
     headers = {
-        "Authorization": f"Bearer {settings.github_token}",
+        "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
     }
     review = {

@@ -7,6 +7,7 @@ from sqlalchemy.pool import NullPool
 
 from prism.agent import run_review
 from prism.config import settings
+from prism.github_auth import get_installation_token
 from prism.github_client import fetch_pr_diff, post_review_comment
 from prism.logging import configure_logging, get_logger
 from prism.repository import ReviewRepository
@@ -25,7 +26,7 @@ celery_app.conf.update(task_serializer="json")
 
 
 @celery_app.task
-def review_pr_task(repo: str, pr_number: int, commit_sha: str) -> None:
+def review_pr_task(repo: str, pr_number: int, commit_sha: str, installation_id: int) -> None:
     correlation_id = str(uuid.uuid4())
     ctx = {"repo": repo, "pr_number": pr_number, "correlation_id": correlation_id}
 
@@ -39,8 +40,9 @@ def review_pr_task(repo: str, pr_number: int, commit_sha: str) -> None:
                 if await repo_db.get_review(repo, pr_number) is not None:
                     logger.info("review already exists, skipping", extra=ctx)
                     return
+                token = await get_installation_token(installation_id)
 
-                raw_diff = await fetch_pr_diff(repo, pr_number)
+                raw_diff = await fetch_pr_diff(repo, pr_number, token)
                 classification, filtered_comments = run_review(repo, pr_number, raw_diff)
                 logger.info(
                     "review generated",
@@ -68,7 +70,7 @@ def review_pr_task(repo: str, pr_number: int, commit_sha: str) -> None:
                         comment.severity,
                     )
 
-                await post_review_comment(repo, pr_number, commit_sha, filtered_comments)
+                await post_review_comment(repo, pr_number, commit_sha, filtered_comments, token)
                 logger.info(
                     "review posted",
                     extra={**ctx, "review_id": review.id, "num_comments": len(filtered_comments)},

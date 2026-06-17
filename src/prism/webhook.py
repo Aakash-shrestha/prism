@@ -1,7 +1,7 @@
 import hashlib
 import hmac
 import json
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -22,6 +22,11 @@ def verify_signature(payload: bytes, signature_header: str) -> bool:
     return hmac.compare_digest(signature, signature_header)
 
 
+class Installation(BaseModel):
+    id: int
+    model_config = ConfigDict(extra="ignore")
+
+
 class Repository(BaseModel):
     model_config = ConfigDict(extra="ignore")
     full_name: str
@@ -33,6 +38,7 @@ class PRWebhookPayload(BaseModel):
     action: str
     number: int
     pull_request: dict[str, Any]
+    installation: Optional[Installation] = None
 
 
 @router.post("/github")
@@ -57,11 +63,17 @@ async def github_webhook(request: Request):
     except (json.JSONDecodeError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f"Invalid payload: {e}") from e
     if payload.action in ["opened", "synchronize"]:
+        if payload.installation is None:
+            raise HTTPException(
+                status_code=400, detail="Missing installation — GitHub App webhook required"
+            )
         try:
             commit_sha = payload.pull_request["head"]["sha"]
         except KeyError as e:
-            raise HTTPException(status_code=400, detail="Missing pull_request.head.sha in payload") from e
-        review_pr_task.delay(repo, payload.number, commit_sha)
+            raise HTTPException(
+                status_code=400, detail="Missing pull_request.head.sha in payload"
+            ) from e
+        review_pr_task.delay(repo, payload.number, commit_sha, payload.installation.id)
         return JSONResponse(
             status_code=202,
             content={"status": "accepted", "pr": payload.number},

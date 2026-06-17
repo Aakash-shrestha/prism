@@ -40,5 +40,11 @@ class Settings(BaseSettings):
     # database
     database_url: str = Field(default="postgresql+asyncpg://localhost/prism", alias="DATABASE_URL")
 
+    # github
+    github_app_id: str = Field(..., alias="GITHUB_APP_ID")
+    github_app_private_key_path: str = Field(
+        default="prism.pem", alias="GITHUB_APP_PRIVATE_KEY_PATH"
+    )
+
 
 settings = Settings()
